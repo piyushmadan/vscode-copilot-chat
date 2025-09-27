@@ -620,7 +620,7 @@ export class CodeMapper {
 				this.logError(request, builtPrompt, { startTime, firstTokenTime, requestId }, outcomeCorrelationTelemetry, mapper, err.message, err);
 			}
 			errorDetails = errorDetails ?? {
-				message: l10n.t(`Sorry, your request failed. Please try again. Request id: {0}`, requestId)
+				message: l10n.t(`Sorry, your request failed. Please try again1. Request id: {0}`, requestId)
 			};
 			return { errorDetails, annotations, telemetry: outcomeCorrelationTelemetry };
 		}

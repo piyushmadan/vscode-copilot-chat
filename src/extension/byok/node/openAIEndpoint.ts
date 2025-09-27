@@ -21,15 +21,38 @@ import { ITelemetryService } from '../../../platform/telemetry/common/telemetry'
 import { ITokenizerProvider } from '../../../platform/tokenizer/node/tokenizer';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 
-function hydrateBYOKErrorMessages(response: ChatResponse): ChatResponse {
+function hydrateBYOKErrorMessages(response: ChatResponse, logService?: ILogService, requestDetails?: { url: string; headers: Record<string, string>; body?: IEndpointBody }): ChatResponse {
 	if (response.type === ChatFetchResponseType.Failed && response.streamError) {
+		// Log detailed error information
+		if (logService && requestDetails) {
+			logService.error('[BYOK API Failure] Request failed with details:');
+			logService.error('  URL: ' + requestDetails.url);
+			logService.error('  Headers: ' + JSON.stringify(sanitizeHeaders(requestDetails.headers)));
+			if (requestDetails.body) {
+				logService.error('  Request Body (truncated): ' + JSON.stringify(truncateRequestBody(requestDetails.body), null, 2));
+			}
+			logService.error('  Stream Error: ' + JSON.stringify(response.streamError));
+			logService.error('  Request ID: ' + response.requestId);
+			logService.error('  Server Request ID: ' + response.serverRequestId);
+		}
+
 		return {
 			type: response.type,
 			requestId: response.requestId,
 			serverRequestId: response.serverRequestId,
 			reason: JSON.stringify(response.streamError),
+			streamError: response.streamError
 		};
 	} else if (response.type === ChatFetchResponseType.RateLimited) {
+		// Log rate limit details
+		if (logService && requestDetails) {
+			logService.warn('[BYOK Rate Limited] Request was rate limited:');
+			logService.warn('  URL: ' + requestDetails.url);
+			logService.warn('  Headers: ' + JSON.stringify(sanitizeHeaders(requestDetails.headers)));
+			logService.warn('  CAPI Error: ' + JSON.stringify(response.capiError));
+			logService.warn('  Request ID: ' + response.requestId);
+		}
+
 		return {
 			type: response.type,
 			requestId: response.requestId,
@@ -39,11 +62,49 @@ function hydrateBYOKErrorMessages(response: ChatResponse): ChatResponse {
 			retryAfter: undefined,
 			capiError: response.capiError
 		};
+	} else if (logService && requestDetails) {
+		// Log all responses for debugging BUS integration
+		logService.info('[BYOK Response Details] Response type: ' + response.type);
+		logService.info('[BYOK Response Details] Request URL: ' + requestDetails.url);
+		logService.info('[BYOK Response Details] Request Headers: ' + JSON.stringify(sanitizeHeaders(requestDetails.headers)));
 	}
 	return response;
 }
 
+// Helper function to sanitize headers for logging (removes sensitive data)
+function sanitizeHeaders(headers: Record<string, string>): Record<string, string> {
+	const sanitized = { ...headers };
+	// Mask sensitive header values
+	if (sanitized['Authorization']) {
+		sanitized['Authorization'] = 'Bearer [REDACTED]';
+	}
+	if (sanitized['api-key']) {
+		sanitized['api-key'] = '[REDACTED]';
+	}
+	if (sanitized['Cookie']) {
+		sanitized['Cookie'] = '[REDACTED]';
+	}
+	return sanitized;
+}
+
+// Helper function to truncate request body for logging
+function truncateRequestBody(body: IEndpointBody): any {
+	const truncated = { ...body };
+	// Truncate messages if they're too long
+	if (truncated.messages && Array.isArray(truncated.messages)) {
+		truncated.messages = truncated.messages.map((msg: any) => {
+			if (msg.content && typeof msg.content === 'string' && msg.content.length > 500) {
+				return { ...msg, content: msg.content.substring(0, 500) + '... [TRUNCATED]' };
+			}
+			return msg;
+		});
+	}
+	return truncated;
+}
+
 export class OpenAIEndpoint extends ChatEndpoint {
+	private readonly _logService: ILogService;
+
 	constructor(
 		protected readonly modelMetadata: IChatModelInformation,
 		protected readonly _apiKey: string,
@@ -74,6 +135,7 @@ export class OpenAIEndpoint extends ChatEndpoint {
 			expService,
 			logService
 		);
+		this._logService = logService;
 	}
 
 	override createRequestBody(options: ICreateEndpointBodyOptions): IEndpointBody {
@@ -108,6 +170,15 @@ export class OpenAIEndpoint extends ChatEndpoint {
 
 	override interceptBody(body: IEndpointBody | undefined): void {
 		super.interceptBody(body);
+
+		// For BUS models, use the full model name instead of the model ID in the request body
+		const isBusModel = this.modelMetadata.id.includes('bus:snap') ||
+			(this.modelMetadata.name && this.modelMetadata.name.includes('bus:snap'));
+
+		if (isBusModel && this.modelMetadata.name && body) {
+			body.model = this.modelMetadata.name;
+		}
+
 		// TODO @lramos15 - We should do this for all models and not just here
 		if (body?.tools?.length === 0) {
 			delete body.tools;
@@ -142,9 +213,18 @@ export class OpenAIEndpoint extends ChatEndpoint {
 
 	public getExtraHeaders(): Record<string, string> {
 		const headers: Record<string, string> = {
-			"Content-Type": "application/json"
+			'Content-Type': 'application/json'
 		};
-		if (this._modelUrl.includes('openai.azure')) {
+
+		// Check if model name contains "bus:snap" for special BUS model handling
+		// Check both the model ID and the model name field
+		const isBusModel = this.modelMetadata.id.includes('bus:snap') ||
+			(this.modelMetadata.name && this.modelMetadata.name.includes('bus:snap'));
+
+		if (isBusModel) {
+			// For BUS models, pass the API key as a Cookie header and avoid Authorization
+			headers['Cookie'] = this._apiKey;
+		} else if (this._modelUrl.includes('openai.azure')) {
 			headers['api-key'] = this._apiKey;
 		} else {
 			headers['Authorization'] = `Bearer ${this._apiKey}`;
@@ -164,10 +244,45 @@ export class OpenAIEndpoint extends ChatEndpoint {
 	public override async makeChatRequest2(options: IMakeChatRequestOptions, token: CancellationToken): Promise<ChatResponse> {
 		// Apply ignoreStatefulMarker: false for initial request
 		const modifiedOptions: IMakeChatRequestOptions = { ...options, ignoreStatefulMarker: false };
+
+		// Capture full request details for logging
+		const requestDetails = {
+			url: this._modelUrl,
+			headers: this.getExtraHeaders(),
+			body: undefined as any // Will be populated in hydrateBYOKErrorMessages if needed
+		};
+
+		// Log the detailed request information
+		this._logService.info('[BYOK Request] =================================');
+		this._logService.info('[BYOK Request] Model ID: ' + this.modelMetadata.id);
+		this._logService.info('[BYOK Request] Model Name: ' + (this.modelMetadata.name || 'undefined'));
+		this._logService.info('[BYOK Request] URL: ' + requestDetails.url);
+		this._logService.info('[BYOK Request] Headers: ' + JSON.stringify(sanitizeHeaders(requestDetails.headers)));
+		this._logService.info('[BYOK Request] Model contains bus:snap (ID): ' + this.modelMetadata.id.includes('bus:snap'));
+		this._logService.info('[BYOK Request] Model contains bus:snap (name): ' + ((this.modelMetadata.name || '').includes('bus:snap')));
+		this._logService.info('[BYOK Request] Request options keys: ' + Object.keys(options).join(', '));
+		const modelToUse = (this.modelMetadata.id.includes('bus:snap') || (this.modelMetadata.name || '').includes('bus:snap')) && this.modelMetadata.name
+			? this.modelMetadata.name
+			: this.modelMetadata.id;
+		this._logService.info('[BYOK Request] Request body will use model: ' + modelToUse);
+		this._logService.info('[BYOK Request] =================================');
+
 		let response = await super.makeChatRequest2(modifiedOptions, token);
+
+		// Log response details
+		this._logService.info('[BYOK Response] Type: ' + response.type);
+		if (response.type === ChatFetchResponseType.Success) {
+			this._logService.info('[BYOK Response] Success - Response length: ' + response.value.length);
+		} else {
+			this._logService.error('[BYOK Response] Error: ' + JSON.stringify(response));
+		}
+
 		if (response.type === ChatFetchResponseType.InvalidStatefulMarker) {
+			this._logService.warn('[BYOK] Invalid stateful marker, retrying without marker');
 			response = await this._makeChatRequest2({ ...options, ignoreStatefulMarker: true }, token);
 		}
-		return hydrateBYOKErrorMessages(response);
+
+		// Enhance error messages with request details and logging
+		return hydrateBYOKErrorMessages(response, this._logService, requestDetails);
 	}
 }

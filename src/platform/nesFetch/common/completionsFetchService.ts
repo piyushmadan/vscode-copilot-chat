@@ -113,6 +113,6 @@ export function getErrorDetailsFromFetchError(requestId: string, error: Completi
 		case 'invalid-api-key':
 		case 'not-configured':
 		default:
-			return { message: l10n.t(`Sorry, your request failed. Please try again. Request id: {0}`, requestId) };
+			return { message: l10n.t(`Sorry, your request failed. Please try again3. Request id: {0}`, requestId) };
 	}
 }
