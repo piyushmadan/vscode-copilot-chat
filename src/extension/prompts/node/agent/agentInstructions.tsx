@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { BasePromptElementProps, PromptElement, PromptSizing } from '@vscode/prompt-tsx';
+import * as fs from 'fs';
 import type { LanguageModelToolInformation } from 'vscode';
 import { ConfigKey, IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import { IExperimentationService } from '../../../../platform/telemetry/common/nullExperimentationService';
@@ -20,6 +21,25 @@ import { KeepGoingReminder } from './agentPrompt';
 // Types and interfaces for reusable components
 interface ToolCapabilities extends Partial<Record<ToolName, boolean>> {
 	readonly hasSomeEditTool: boolean;
+}
+
+// Utility function to read custom system prompt from file at runtime (enables hot-reload)
+function getCustomSystemPrompt(): string | null {
+	try {
+		const vscode = require('vscode');
+		const config = vscode.workspace.getConfiguration('github.copilot.chat');
+		const promptFilePath = (config.get('systemPromptFile') as string || '').trim();
+
+		if (promptFilePath && fs.existsSync(promptFilePath)) {
+			const content = fs.readFileSync(promptFilePath, 'utf-8').trim();
+			if (content) {
+				return content;
+			}
+		}
+	} catch (err) {
+		console.warn('Failed to read custom system prompt:', err);
+	}
+	return null;
 }
 
 // Utility function to detect available tools
@@ -54,9 +74,15 @@ export class DefaultAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 		const isGpt5Codex = this.props.modelFamily === 'gpt-5-codex';
 		const isGrokCode = this.props.modelFamily?.startsWith('grok-code') === true;
 
+		// Read custom system prompt at runtime (enables hot-reload without recompiling)
+		const customPrompt = getCustomSystemPrompt();
+		const systemPromptText = customPrompt || 'You are a highly sophisticated automated coding agent with expert-level knowledge across many different programming languages and frameworks.';
+
 		return <InstructionMessage>
 			<Tag name='instructions'>
-				You are a highly sophisticated automated coding agent with expert-level knowledge across many different programming languages and frameworks.<br />
+				{systemPromptText.split('\n').map((line, idx, arr) => (
+					<>{line}{idx < arr.length - 1 && <br />}</>
+				))}<br />
 				The user will ask a question, or ask you to perform a task, and it may require lots of research to answer correctly. There is a selection of tools that let you perform actions or retrieve helpful context to answer the user's question.<br />
 				{isGrokCode && <>Your main goal is to complete the user's request, denoted within the &lt;user_query&gt; tag.<br /></>}
 				<KeepGoingReminder modelFamily={this.props.modelFamily} />

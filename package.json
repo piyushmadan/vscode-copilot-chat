@@ -1819,6 +1819,16 @@
 				"enablement": "github.copilot.chat.replay.workspaceEditTracing"
 			},
 			{
+				"command": "github.copilot.chat.previewCurrentSystemPrompt",
+				"title": "Preview Current System Prompt",
+				"category": "Copilot Chat"
+			},
+			{
+				"command": "github.copilot.chat.applySystemPromptFromFile",
+				"title": "Apply System Prompt from File",
+				"category": "Copilot Chat"
+			},
+			{
 				"command": "github.copilot.chat.explain",
 				"title": "%github.copilot.command.explainThis%",
 				"enablement": "!github.copilot.interactiveSession.disabled",
@@ -2244,6 +2254,16 @@
 						"type": "boolean",
 						"default": true,
 						"description": "%github.copilot.config.renameSuggestions.triggerAutomatically%"
+					},
+					"github.copilot.chat.systemPromptFile": {
+						"type": "string",
+						"default": "",
+						"description": "Absolute path to a text file containing a custom system prompt to apply to agentInstructions.tsx. Leave empty to keep the default prompt."
+					},
+					"github.copilot.chat.workspaceFolder": {
+						"type": "string",
+						"default": "",
+						"description": "Absolute path to the workspace root. Used to locate agentInstructions.tsx when no workspace folder is open. Leave empty to use the active workspace folder."
 					},
 					"github.copilot.chat.localeOverride": {
 						"type": "string",

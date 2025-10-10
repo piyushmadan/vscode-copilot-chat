@@ -40,6 +40,7 @@ import { ChatReplayContribution } from '../../replay/vscode-node/chatReplayContr
 import { SearchPanelCommands } from '../../search/vscode-node/commands';
 import { SettingsSchemaFeature } from '../../settingsSchema/vscode-node/settingsSchemaFeature';
 import { SurveyCommandContribution } from '../../survey/vscode-node/surveyCommands';
+import * as systemPromptCommands from '../../systemPrompt/vscode-node/systemPromptCommands';
 import { SetupTestsContribution } from '../../testing/vscode/setupTestContributions';
 import { ToolsContribution } from '../../tools/vscode-node/tools';
 import { InlineCompletionContribution } from '../../typescriptContext/vscode-node/languageContextService';
@@ -109,4 +110,5 @@ export const vscodeNodeChatContributions: IExtensionContributionFactory[] = [
 	asContributionFactory(BYOKContrib),
 	asContributionFactory(McpSetupCommands),
 	newWorkspaceContribution,
+	systemPromptCommands,
 ];
