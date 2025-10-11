@@ -32,7 +32,8 @@ function getCustomSystemPrompt(): string | null {
 
 		if (promptFilePath && fs.existsSync(promptFilePath)) {
 			const content = fs.readFileSync(promptFilePath, 'utf-8').trim();
-			if (content) {
+			// Only return content if it's non-empty after trimming
+			if (content && content.length > 0) {
 				return content;
 			}
 		}
@@ -76,13 +77,10 @@ export class DefaultAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 
 		// Read custom system prompt at runtime (enables hot-reload without recompiling)
 		const customPrompt = getCustomSystemPrompt();
-		const systemPromptText = customPrompt || 'You are a highly sophisticated automated coding agent with expert-level knowledge across many different programming languages and frameworks.';
 
 		return <InstructionMessage>
 			<Tag name='instructions'>
-				{systemPromptText.split('\n').map((line, idx, arr) => (
-					<>{line}{idx < arr.length - 1 && <br />}</>
-				))}<br />
+				You are a highly sophisticated automated coding agent with expert-level knowledge across many different programming languages and frameworks.<br />
 				The user will ask a question, or ask you to perform a task, and it may require lots of research to answer correctly. There is a selection of tools that let you perform actions or retrieve helpful context to answer the user's question.<br />
 				{isGrokCode && <>Your main goal is to complete the user's request, denoted within the &lt;user_query&gt; tag.<br /></>}
 				<KeepGoingReminder modelFamily={this.props.modelFamily} />
@@ -136,6 +134,9 @@ export class DefaultAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 				{!this.props.codesearchMode && tools.hasSomeEditTool && <>NEVER print out a codeblock with file changes unless the user asked for it. Use the appropriate edit tool instead.<br /></>}
 				{tools[ToolName.CoreRunInTerminal] && <>NEVER print out a codeblock with a terminal command to run unless the user asked for it. Use the {ToolName.CoreRunInTerminal} tool instead.<br /></>}
 				You don't need to read a file if it's already provided in context.
+				{customPrompt && customPrompt.length > 0 && <><br />{customPrompt.split('\n').map((line: string, idx: number, arr: string[]) => (
+					<>{line}{idx < arr.length - 1 && <br />}</>
+				))}</>}
 			</Tag>
 			<Tag name='toolUseInstructions'>
 				If the user is requesting a code sample, you can answer it directly without using any tools.<br />
